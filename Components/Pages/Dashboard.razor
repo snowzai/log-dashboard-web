@@ -1,0 +1,397 @@
+@page "/"
+@rendermode InteractiveServer
+@using LogDashboard.Web.Models
+@using LogDashboard.Web.Services
+@using Microsoft.Extensions.Options
+@inject DashboardState State
+@inject LogWatcherService Watcher
+@inject IOptions<AppSettings> AppSettingsOptions
+@implements IDisposable
+
+<PageTitle>Log Dashboard</PageTitle>
+
+<div class="dashboard">
+
+    <!-- ══ TITLEBAR ══════════════════════════════════════════════ -->
+    <header class="titlebar">
+        <div class="titlebar-left">
+            <span class="app-title">LOG DASHBOARD</span>
+            @if (State.IsWatching)
+            {
+                <span class="watching-badge">
+                    <span class="pulse-dot"></span>
+                    watching
+                </span>
+            }
+        </div>
+        <div class="titlebar-right">
+            <div class="folder-chip" title="@State.CurrentFolder">
+                <span class="folder-icon">⌂</span>
+                <span class="folder-path">@(string.IsNullOrEmpty(State.CurrentFolder) ? "尚未設定路徑" : State.CurrentFolder)</span>
+            </div>
+
+            <button class="icon-btn @(State.IsWatching ? "watching" : "")"
+                    @onclick="ToggleWatcher"
+                    title="@(State.IsWatching ? "暫停自動刷新" : "開始自動刷新")">
+                @(State.IsWatching ? "⏸" : "▶")
+            </button>
+
+            <button class="icon-btn" @onclick="RefreshAsync" title="重新整理">↺</button>
+
+            <select class="interval-select" @onchange="OnIntervalChanged">
+                @foreach (var opt in _intervalOptions)
+                {
+                    <option value="@opt.Seconds" selected="@(opt.Seconds == _currentIntervalSeconds)">@opt.Label</option>
+                }
+            </select>
+        </div>
+    </header>
+
+    <!-- ══ BODY ══════════════════════════════════════════════════ -->
+    <div class="body-grid @(State.SelectedLog != null ? "detail-open" : "")">
+
+        <!-- ── LEFT SIDEBAR ───────────────────────────────────── -->
+        <aside class="sidebar">
+            <div class="sidebar-scroll">
+
+                <!-- Overview -->
+                <div class="sidebar-block">
+                    <span class="side-label">OVERVIEW</span>
+                    <div class="total-row">
+                        <span class="total-num">@State.TotalCount</span>
+                        <span class="total-sub">total logs</span>
+                    </div>
+                </div>
+
+                <div class="sidebar-sep"></div>
+
+                <!-- Level filter -->
+                <div class="sidebar-block">
+                    <span class="side-label">LEVEL</span>
+                    <div class="level-list">
+                        <LevelRow Level="All"        Count="@State.TotalCount"       Color="#64748B" Selected="@(State.SelectedLevel == "All")"        OnClick="@(() => State.SetLevelFilter("All"))" />
+                        <LevelRow Level="Fatal"      Count="@State.FatalCount"       Color="#C026D3" Selected="@(State.SelectedLevel == "Fatal")"      OnClick="@(() => State.SetLevelFilter("Fatal"))" />
+                        <LevelRow Level="Error"      Count="@State.ErrorCount"       Color="#EF4444" Selected="@(State.SelectedLevel == "Error")"      OnClick="@(() => State.SetLevelFilter("Error"))" />
+                        <LevelRow Level="Warning"    Count="@State.WarningCount"     Color="#F59E0B" Selected="@(State.SelectedLevel == "Warning")"    OnClick="@(() => State.SetLevelFilter("Warning"))" />
+                        <LevelRow Level="Information" Count="@State.InformationCount" Color="#3B82F6" Selected="@(State.SelectedLevel == "Information")" OnClick="@(() => State.SetLevelFilter("Information"))" />
+                        <LevelRow Level="Debug"      Count="@State.DebugCount"       Color="#06B6D4" Selected="@(State.SelectedLevel == "Debug")"      OnClick="@(() => State.SetLevelFilter("Debug"))" />
+                        <LevelRow Level="Verbose"    Count="@State.VerboseCount"     Color="#94A3B8" Selected="@(State.SelectedLevel == "Verbose")"    OnClick="@(() => State.SetLevelFilter("Verbose"))" />
+                    </div>
+                </div>
+
+                <div class="sidebar-sep"></div>
+
+                <!-- Time range -->
+                <div class="sidebar-block">
+                    <span class="side-label">TIME RANGE</span>
+                    <div class="time-chips">
+                        @foreach (var tr in _timeRanges)
+                        {
+                            <button class="time-chip @(State.SelectedTimeRange == tr ? "active" : "")"
+                                    @onclick="@(() => State.SetTimeRange(tr))">@tr</button>
+                        }
+                    </div>
+                </div>
+
+                <div class="sidebar-sep"></div>
+
+                <!-- Search -->
+                <div class="sidebar-block">
+                    <span class="side-label">SEARCH</span>
+                    <input class="search-input"
+                           type="text"
+                           placeholder="message / exception / props..."
+                           value="@State.SearchText"
+                           @oninput="@(e => State.SetSearch(e.Value?.ToString() ?? string.Empty))" />
+                </div>
+
+                <div class="sidebar-sep"></div>
+
+                <!-- Date range -->
+                <div class="sidebar-block">
+                    <div class="date-header">
+                        <span class="side-label">DATE RANGE</span>
+                        @if (State.IsCustomDateRange)
+                        {
+                            <button class="clear-btn" @onclick="() => State.ClearDateRange()">✕ clear</button>
+                        }
+                    </div>
+                    <div class="date-group">
+                        <span class="date-sub">From</span>
+                        <input type="date" class="date-input"
+                               value="@(_startDate?.ToString("yyyy-MM-dd") ?? "")"
+                               @onchange="OnStartDateChanged" />
+                        <input type="time" class="date-input" step="1"
+                               value="@(_startTime?.ToString(@"hh\:mm\:ss") ?? "")"
+                               @onchange="OnStartTimeChanged" />
+                    </div>
+                    <div class="date-group">
+                        <span class="date-sub">To</span>
+                        <input type="date" class="date-input"
+                               value="@(_endDate?.ToString("yyyy-MM-dd") ?? "")"
+                               @onchange="OnEndDateChanged" />
+                        <input type="time" class="date-input" step="1"
+                               value="@(_endTime?.ToString(@"hh\:mm\:ss") ?? "")"
+                               @onchange="OnEndTimeChanged" />
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+
+        <!-- ── MAIN CONTENT ───────────────────────────────────── -->
+        <main class="main-content">
+
+            @if (State.IsLoading)
+            {
+                <div class="loading-overlay">
+                    <div class="spinner"></div>
+                    <span>載入中...</span>
+                </div>
+            }
+            else if (State.ErrorMessage is not null)
+            {
+                <div class="error-banner">⚠ @State.ErrorMessage</div>
+            }
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab @(_activeTab == 0 ? "active" : "")" @onclick="@(() => _activeTab = 0)">
+                    All logs
+                    <span class="tab-badge info">@State.TotalCount</span>
+                </button>
+                <button class="tab @(_activeTab == 1 ? "active" : "")" @onclick="@(() => _activeTab = 1)">
+                    Exceptions
+                    @if (State.ExceptionCount > 0)
+                    {
+                        <span class="tab-badge error">@State.ExceptionCount</span>
+                    }
+                </button>
+            </div>
+
+            <!-- Log table -->
+            <div class="log-table-wrap">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th style="width:180px">Timestamp</th>
+                            <th style="width:110px">Level</th>
+                            <th>Message</th>
+                            @if (_activeTab == 1)
+                            {
+                                <th style="width:260px">Exception</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{
+                            var rows = _activeTab == 0 ? State.FilteredLogs : State.ExceptionLogs;
+                            var paged = rows.Take(PageSize).ToList();
+                        }
+                        @foreach (var log in paged)
+                        {
+                            var isSelected = log == State.SelectedLog;
+                            <tr class="log-row @(isSelected ? "selected" : "")"
+                                @onclick="@(() => State.SelectLog(isSelected ? null : log))">
+                                <td class="mono ts">@log.Timestamp.ToString("MM-dd HH:mm:ss.fff")</td>
+                                <td>
+                                    <span class="level-badge" style="color:@LevelColor(log.Level);background:@LevelBg(log.Level)">
+                                        @log.Level
+                                    </span>
+                                </td>
+                                <td class="msg-cell">@log.Message</td>
+                                @if (_activeTab == 1)
+                                {
+                                    <td class="mono exc-cell">@log.Exception</td>
+                                }
+                            </tr>
+                        }
+                        @if (!rows.Any())
+                        {
+                            <tr>
+                                <td colspan="4" class="empty-row">無符合條件的 log</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (rows.Count > PageSize)
+                {
+                    <div class="page-hint">顯示前 @PageSize 筆，共 @rows.Count 筆</div>
+                }
+            </div>
+        </main>
+
+        <!-- ── DETAIL PANEL ───────────────────────────────────── -->
+        @if (State.SelectedLog is { } selectedLog)
+        {
+            <aside class="detail-panel">
+                <div class="detail-header">
+                    <span class="side-label">LOG DETAIL</span>
+                    <button class="close-btn" @onclick="@(() => State.SelectLog(null))">✕</button>
+                </div>
+                <div class="detail-scroll">
+
+                    <div class="detail-field">
+                        <span class="detail-key">TIMESTAMP</span>
+                        <span class="detail-val mono">@selectedLog.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")</span>
+                    </div>
+
+                    <div class="detail-field">
+                        <span class="detail-key">LEVEL</span>
+                        <span class="level-badge" style="color:@LevelColor(selectedLog.Level);background:@LevelBg(selectedLog.Level)">@selectedLog.Level</span>
+                    </div>
+
+                    <div class="detail-field">
+                        <span class="detail-key">MESSAGE</span>
+                        <span class="detail-val">@selectedLog.Message</span>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(selectedLog.Exception))
+                    {
+                        <div class="detail-field">
+                            <span class="detail-key">EXCEPTION</span>
+                            <pre class="exception-box">@selectedLog.Exception</pre>
+                        </div>
+                    }
+
+                    @if (selectedLog.Properties.Count > 0)
+                    {
+                        <div class="detail-field">
+                            <span class="detail-key">PROPERTIES</span>
+                            <div class="props-box">
+                                @foreach (var kv in selectedLog.Properties)
+                                {
+                                    <div class="prop-row">
+                                        <span class="prop-key">@kv.Key</span>
+                                        <span class="prop-val">@kv.Value</span>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                </div>
+            </aside>
+        }
+    </div>
+</div>
+
+@code {
+    private AppSettings _settings = new();
+    private int _activeTab = 0;
+    private Action? _onChangeHandler;
+    private int _currentIntervalSeconds = 10;
+
+    private DateTime? _startDate;
+    private TimeSpan? _startTime;
+    private DateTime? _endDate;
+    private TimeSpan? _endTime;
+
+    private readonly string[] _timeRanges = ["1h", "4h", "12h", "1d", "7d", "1mon", "All"];
+
+    private record IntervalOption(string Label, int Seconds);
+    private readonly List<IntervalOption> _intervalOptions =
+    [
+        new("5 秒",  5),
+        new("10 秒", 10),
+        new("30 秒", 30),
+        new("1 分鐘", 60),
+        new("5 分鐘", 300),
+    ];
+
+    private int PageSize => _settings.PageSize;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = AppSettingsOptions.Value;
+        _currentIntervalSeconds = _settings.AutoRefreshSeconds > 0
+            ? _settings.AutoRefreshSeconds
+            : 10;
+
+        _onChangeHandler = async () => await InvokeAsync(StateHasChanged);
+        State.OnChange += _onChangeHandler;
+
+        if (!string.IsNullOrWhiteSpace(_settings.LogFolder))
+        {
+            State.SetFolder(_settings.LogFolder);
+            // 啟動時只做一次性載入，不自動啟動 watcher
+            // 使用者按 ▶ 才開始 auto refresh
+            await Watcher.LoadOnceAsync(_settings.LogFolder, _settings.IncludeSubDirectories);
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.LogFolder))
+            await Watcher.LoadOnceAsync(_settings.LogFolder, _settings.IncludeSubDirectories);
+    }
+
+    private void ToggleWatcher()
+    {
+        State.IsWatching = !State.IsWatching;
+
+        if (State.IsWatching)
+            Watcher.Start(_settings.LogFolder, _settings.IncludeSubDirectories, _currentIntervalSeconds);
+        else
+            Watcher.Stop();
+    }
+
+    private void OnIntervalChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var sec))
+        {
+            _currentIntervalSeconds = sec;
+            if (State.IsWatching)
+                Watcher.ChangeInterval(sec, _settings.LogFolder, _settings.IncludeSubDirectories);
+        }
+    }
+
+    private void OnStartDateChanged(ChangeEventArgs e)
+    {
+        _startDate = DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null;
+        State.SetDateRange(_startDate, _startTime, _endDate, _endTime);
+    }
+
+    private void OnStartTimeChanged(ChangeEventArgs e)
+    {
+        _startTime = TimeSpan.TryParse(e.Value?.ToString(), out var t) ? t : null;
+        State.SetDateRange(_startDate, _startTime, _endDate, _endTime);
+    }
+
+    private void OnEndDateChanged(ChangeEventArgs e)
+    {
+        _endDate = DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null;
+        State.SetDateRange(_startDate, _startTime, _endDate, _endTime);
+    }
+
+    private void OnEndTimeChanged(ChangeEventArgs e)
+    {
+        _endTime = TimeSpan.TryParse(e.Value?.ToString(), out var t) ? t : null;
+        State.SetDateRange(_startDate, _startTime, _endDate, _endTime);
+    }
+
+    private static string LevelColor(string level) => level switch
+    {
+        "Fatal"       => "#E9D5FF",
+        "Error"       => "#FCA5A5",
+        "Warning"     => "#FDE68A",
+        "Information" => "#93C5FD",
+        "Debug"       => "#67E8F9",
+        _             => "#94A3B8",
+    };
+
+    private static string LevelBg(string level) => level switch
+    {
+        "Fatal"       => "#3B0764",
+        "Error"       => "#450A0A",
+        "Warning"     => "#451A03",
+        "Information" => "#0C1A3B",
+        "Debug"       => "#083344",
+        _             => "#0F172A",
+    };
+
+    public void Dispose()
+    {
+        State.OnChange -= _onChangeHandler;
+    }
+}

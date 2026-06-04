@@ -1,0 +1,15 @@
+@* Sidebar level filter row *@
+
+<button class="stat-row @(Selected ? "active" : "")" @onclick="OnClick">
+    <span class="dot" style="background:@Color"></span>
+    <span class="level-name">@Level</span>
+    <span class="level-count" style="color:@(Selected || Count > 0 ? Color : "inherit")">@Count</span>
+</button>
+
+@code {
+    [Parameter, EditorRequired] public string Level  { get; set; } = "";
+    [Parameter, EditorRequired] public int    Count  { get; set; }
+    [Parameter, EditorRequired] public string Color  { get; set; } = "#64748B";
+    [Parameter, EditorRequired] public bool   Selected { get; set; }
+    [Parameter, EditorRequired] public EventCallback OnClick { get; set; }
+}
