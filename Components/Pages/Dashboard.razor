@@ -7,6 +7,7 @@
 @inject LogWatcherService Watcher
 @inject IOptions<AppSettings> AppSettingsOptions
 @implements IDisposable
+@inject IJSRuntime JS
 
 <PageTitle>Log Dashboard</PageTitle>
 
@@ -29,6 +30,10 @@
                 <span class="folder-icon">⌂</span>
                 <span class="folder-path">@(string.IsNullOrEmpty(State.CurrentFolder) ? "尚未設定路徑" : State.CurrentFolder)</span>
             </div>
+
+            <button class="theme-toggle" @onclick="ToggleThemeAsync" title="切換 Light/Dark 主題">
+                @(_currentTheme == "dark" ? "☀" : "🌙")
+            </button>
 
             <button class="icon-btn @(State.IsWatching ? "watching" : "")"
                     @onclick="ToggleWatcher"
@@ -69,13 +74,13 @@
                 <div class="sidebar-block">
                     <span class="side-label">LEVEL</span>
                     <div class="level-list">
-                        <LevelRow Level="All"        Count="@State.TotalCount"       Color="#64748B" Selected="@(State.SelectedLevel == "All")"        OnClick="@(() => State.SetLevelFilter("All"))" />
-                        <LevelRow Level="Fatal"      Count="@State.FatalCount"       Color="#C026D3" Selected="@(State.SelectedLevel == "Fatal")"      OnClick="@(() => State.SetLevelFilter("Fatal"))" />
-                        <LevelRow Level="Error"      Count="@State.ErrorCount"       Color="#EF4444" Selected="@(State.SelectedLevel == "Error")"      OnClick="@(() => State.SetLevelFilter("Error"))" />
-                        <LevelRow Level="Warning"    Count="@State.WarningCount"     Color="#F59E0B" Selected="@(State.SelectedLevel == "Warning")"    OnClick="@(() => State.SetLevelFilter("Warning"))" />
+                        <LevelRow Level="All" Count="@State.TotalCount" Color="#64748B" Selected="@(State.SelectedLevel == "All")" OnClick="@(() => State.SetLevelFilter("All"))" />
+                        <LevelRow Level="Fatal" Count="@State.FatalCount" Color="#C026D3" Selected="@(State.SelectedLevel == "Fatal")" OnClick="@(() => State.SetLevelFilter("Fatal"))" />
+                        <LevelRow Level="Error" Count="@State.ErrorCount" Color="#EF4444" Selected="@(State.SelectedLevel == "Error")" OnClick="@(() => State.SetLevelFilter("Error"))" />
+                        <LevelRow Level="Warning" Count="@State.WarningCount" Color="#F59E0B" Selected="@(State.SelectedLevel == "Warning")" OnClick="@(() => State.SetLevelFilter("Warning"))" />
                         <LevelRow Level="Information" Count="@State.InformationCount" Color="#3B82F6" Selected="@(State.SelectedLevel == "Information")" OnClick="@(() => State.SetLevelFilter("Information"))" />
-                        <LevelRow Level="Debug"      Count="@State.DebugCount"       Color="#06B6D4" Selected="@(State.SelectedLevel == "Debug")"      OnClick="@(() => State.SetLevelFilter("Debug"))" />
-                        <LevelRow Level="Verbose"    Count="@State.VerboseCount"     Color="#94A3B8" Selected="@(State.SelectedLevel == "Verbose")"    OnClick="@(() => State.SetLevelFilter("Verbose"))" />
+                        <LevelRow Level="Debug" Count="@State.DebugCount" Color="#06B6D4" Selected="@(State.SelectedLevel == "Debug")" OnClick="@(() => State.SetLevelFilter("Debug"))" />
+                        <LevelRow Level="Verbose" Count="@State.VerboseCount" Color="#94A3B8" Selected="@(State.SelectedLevel == "Verbose")" OnClick="@(() => State.SetLevelFilter("Verbose"))" />
                     </div>
                 </div>
 
@@ -88,7 +93,9 @@
                         @foreach (var tr in _timeRanges)
                         {
                             <button class="time-chip @(State.SelectedTimeRange == tr ? "active" : "")"
-                                    @onclick="@(() => State.SetTimeRange(tr))">@tr</button>
+                                    @onclick="@(() => State.SetTimeRange(tr))">
+                                @tr
+                            </button>
                         }
                     </div>
                 </div>
@@ -195,7 +202,7 @@
                                 @onclick="@(() => State.SelectLog(isSelected ? null : log))">
                                 <td class="mono ts">@log.Timestamp.ToString("MM-dd HH:mm:ss.fff")</td>
                                 <td>
-                                    <span class="level-badge" style="color:@LevelColor(log.Level);background:@LevelBg(log.Level)">
+                                    <span class="level-badge level-@log.Level.ToLowerInvariant()">
                                         @log.Level
                                     </span>
                                 </td>
@@ -238,7 +245,7 @@
 
                     <div class="detail-field">
                         <span class="detail-key">LEVEL</span>
-                        <span class="level-badge" style="color:@LevelColor(selectedLog.Level);background:@LevelBg(selectedLog.Level)">@selectedLog.Level</span>
+                        <span class="level-badge level-@selectedLog.Level.ToLowerInvariant()">@selectedLog.Level</span>
                     </div>
 
                     <div class="detail-field">
@@ -289,6 +296,8 @@
 
     private readonly string[] _timeRanges = ["1h", "4h", "12h", "1d", "7d", "1mon", "All"];
 
+    private string _currentTheme = "dark";
+
     private record IntervalOption(string Label, int Seconds);
     private readonly List<IntervalOption> _intervalOptions =
     [
@@ -317,6 +326,15 @@
             // 啟動時只做一次性載入，不自動啟動 watcher
             // 使用者按 ▶ 才開始 auto refresh
             await Watcher.LoadOnceAsync(_settings.LogFolder, _settings.IncludeSubDirectories);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _currentTheme = await JS.InvokeAsync<string>("themeManager.init");
+            StateHasChanged();
         }
     }
 
@@ -372,26 +390,32 @@
 
     private static string LevelColor(string level) => level switch
     {
-        "Fatal"       => "#E9D5FF",
-        "Error"       => "#FCA5A5",
-        "Warning"     => "#FDE68A",
+        "Fatal" => "#E9D5FF",
+        "Error" => "#FCA5A5",
+        "Warning" => "#FDE68A",
         "Information" => "#93C5FD",
-        "Debug"       => "#67E8F9",
-        _             => "#94A3B8",
+        "Debug" => "#67E8F9",
+        _ => "#94A3B8",
     };
 
     private static string LevelBg(string level) => level switch
     {
-        "Fatal"       => "#3B0764",
-        "Error"       => "#450A0A",
-        "Warning"     => "#451A03",
+        "Fatal" => "#3B0764",
+        "Error" => "#450A0A",
+        "Warning" => "#451A03",
         "Information" => "#0C1A3B",
-        "Debug"       => "#083344",
-        _             => "#0F172A",
+        "Debug" => "#083344",
+        _ => "#0F172A",
     };
 
     public void Dispose()
     {
         State.OnChange -= _onChangeHandler;
+    }
+
+    private async Task ToggleThemeAsync()
+    {
+        _currentTheme = _currentTheme == "dark" ? "light" : "dark";
+        await JS.InvokeVoidAsync("themeManager.set", _currentTheme);
     }
 }
