@@ -163,11 +163,11 @@
 
             <!-- Tabs -->
             <div class="tabs">
-                <button class="tab @(_activeTab == 0 ? "active" : "")" @onclick="@(() => _activeTab = 0)">
+                <button class="tab @(_activeTab == 0 ? "active" : "")" @onclick="@(() => { _activeTab = 0; _currentPage = 1; })">
                     All logs
                     <span class="tab-badge info">@State.TotalCount</span>
                 </button>
-                <button class="tab @(_activeTab == 1 ? "active" : "")" @onclick="@(() => _activeTab = 1)">
+                <button class="tab @(_activeTab == 1 ? "active" : "")" @onclick="@(() => { _activeTab = 1; _currentPage = 1; })">
                     Exceptions
                     @if (State.ExceptionCount > 0)
                     {
@@ -193,7 +193,11 @@
                     <tbody>
                         @{
                             var rows = _activeTab == 0 ? State.FilteredLogs : State.ExceptionLogs;
-                            var paged = rows.Take(PageSize).ToList();
+                            var totalPages = TotalPages(rows.Count);
+                            var paged = rows
+                                .Skip((_currentPage - 1) * PageSize)
+                                .Take(PageSize)
+                                .ToList();
                         }
                         @foreach (var log in paged)
                         {
@@ -223,7 +227,31 @@
                 </table>
                 @if (rows.Count > PageSize)
                 {
-                    <div class="page-hint">顯示前 @PageSize 筆，共 @rows.Count 筆</div>
+                    <div class="page-hint">
+                        <button class="page-btn" disabled="@(_currentPage <= 1)"
+                                @onclick="@(() => GoToPage(_currentPage - 1, rows.Count))">
+                            ‹
+                        </button>
+
+                        @for (var i = Math.Max(1, _currentPage - 2);
+                                  i <= Math.Min(totalPages, _currentPage + 2); i++)
+                        {
+                            var p = i;
+                            <button class="page-btn @(p == _currentPage ? "active" : "")"
+                                    @onclick="@(() => GoToPage(p, rows.Count))">
+                                @p
+                            </button>
+                        }
+
+                        <button class="page-btn" disabled="@(_currentPage >= totalPages)"
+                                @onclick="@(() => GoToPage(_currentPage + 1, rows.Count))">
+                            ›
+                        </button>
+
+                        <span style="margin-left:8px;color:var(--text-dim)">
+                            第 @_currentPage / @totalPages 頁，共 @rows.Count 筆
+                        </span>
+                    </div>
                 }
             </div>
         </main>
@@ -308,6 +336,8 @@
         new("5 分鐘", 300),
     ];
 
+    private int _currentPage = 1;
+    private int TotalPages(int totalCount) => (int)Math.Ceiling((double)totalCount / PageSize);
     private int PageSize => _settings.PageSize;
 
     protected override async Task OnInitializedAsync()
@@ -317,7 +347,11 @@
             ? _settings.AutoRefreshSeconds
             : 10;
 
-        _onChangeHandler = async () => await InvokeAsync(StateHasChanged);
+        _onChangeHandler = async () =>
+        {
+            _currentPage = 1;
+            await InvokeAsync(StateHasChanged);
+        };
         State.OnChange += _onChangeHandler;
 
         if (!string.IsNullOrWhiteSpace(_settings.LogFolder))
@@ -417,5 +451,11 @@
     {
         _currentTheme = _currentTheme == "dark" ? "light" : "dark";
         await JS.InvokeVoidAsync("themeManager.set", _currentTheme);
+    }
+
+    private void GoToPage(int page, int totalCount)
+    {
+        var max = TotalPages(totalCount);
+        _currentPage = Math.Clamp(page, 1, max < 1 ? 1 : max);
     }
 }

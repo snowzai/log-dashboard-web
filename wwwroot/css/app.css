@@ -904,3 +904,46 @@ html, body {
     #blazor-error-ui.blazor-error-boundary {
         display: block;
     }
+
+/* Pagination */
+.page-hint {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-2);
+    flex-shrink: 0;
+}
+
+.page-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 11px;
+    min-width: 26px;
+    padding: 3px 6px;
+    transition: background 0.12s, color 0.12s;
+}
+
+    .page-btn:hover:not(:disabled) {
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
+    .page-btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+    }
+
+    .page-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+    }
